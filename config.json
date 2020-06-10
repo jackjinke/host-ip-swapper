@@ -1,0 +1,55 @@
+{
+  "serverless-cloud-function-application": {
+    "application": {
+      "English": {
+        "name": "LightsailIpSwapper",
+        "description": "Swap AWS Lightsail instance's static IP if needed",
+        "attention": "No",
+        "readme": {
+          "file": "",
+          "content": ""
+        },
+        "license": {
+          "file": "LICENSE",
+          "content": "Open"
+        },
+        "author": {
+          "name": "jackjinke"
+        }
+      },
+      "input_parameters": {
+        "event": "",
+        "context": ""
+      },
+      "output_parameters": {
+      },
+      "download_address": "https://github.com/jackjinke/lightsail-ip-swapper/tree/master",
+      "tags": [
+        "Python3.6"
+      ],
+      "version": "1.0.0"
+    },
+    "functions": {
+      "name": "LightsailIpSwapper",
+      "description": "Swap AWS Lightsail instance's static IP if needed",
+      "handler": "index.main_handler",
+      "memorySize": 256,
+      "timeout": 15,
+      "runtime": "Python3.6",
+      "Environment": {
+      },
+      "Events": {
+      },
+      "VpcConfig": {
+      },
+      "codeObject": {
+        "codeFile": [
+          "index.py"
+        ],
+        "CodeUri": [
+          "https://github.com/jackjinke/lightsail-ip-swapper/tree/master"
+        ]
+      }
+    }
+  }
+}
