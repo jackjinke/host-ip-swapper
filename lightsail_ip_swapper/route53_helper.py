@@ -11,7 +11,7 @@ class Route53Helper:
         )
 
     def update_dns_with_ip(self, hosted_zone_id, dns, ip):
-        print("Updating A record for DNS {} in Route53 hosted zone {}".format(dns, hosted_zone_id))
+        print("Updating A in hosted zone {}: {} -> {}".format(hosted_zone_id, dns, ip))
         self.client.change_resource_record_sets(
             HostedZoneId=hosted_zone_id,
             ChangeBatch={
@@ -21,7 +21,7 @@ class Route53Helper:
                         'ResourceRecordSet': {
                             'Name': dns,
                             'Type': 'A',
-                            'TTL': 300,
+                            'TTL': 60,
                             'ResourceRecords': [
                                 {'Value': ip},
                             ],
