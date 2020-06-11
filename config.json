@@ -34,7 +34,7 @@
       "description": "Swap AWS Lightsail instance's static IP if needed",
       "handler": "index.main_handler",
       "memorySize": 256,
-      "timeout": 15,
+      "timeout": 30,
       "runtime": "Python3.6",
       "Environment": {
       },

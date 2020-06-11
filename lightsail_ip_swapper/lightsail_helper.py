@@ -5,7 +5,6 @@ import string
 
 
 class LightsailHelper:
-    unused_ip_names = []
 
     def __init__(self, region, credentials):
         self.client = boto3.client(
@@ -14,6 +13,7 @@ class LightsailHelper:
             aws_secret_access_key=credentials['secret_key'],
             region_name=region
         )
+        self.unused_ip_names = []
 
     def get_lightsail_info_from_ip(self, ip):
         response = self.client.get_static_ips()
@@ -26,6 +26,8 @@ class LightsailHelper:
                 static_ip_name = static_ip_obj['name']
                 instance_name = static_ip_obj['attachedTo']
                 return static_ip_name, instance_name
+        # If not returned at this point, no static IP found that matches the input IP
+        raise RuntimeError('IP {} not found in Lightsail. Please check and update DNS manually'.format(ip))
 
     def swap_ip(self, static_ip_name, instance_name):
         new_ip_name = 'StaticIp-' + get_random_string()
