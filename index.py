@@ -11,7 +11,7 @@ DNS_NAME = os.getenv('DNS_NAME')
 OPEN_PORT = os.getenv('OPEN_PORT')
 
 
-def main_handler(event):
+def main_handler(event, context):
     force_swap = event['force_swap'].lower() == 'true' if 'force_swap' in event else False
     ip_swapper = IPSwapper(
         aws_region=AWS_REGION,
