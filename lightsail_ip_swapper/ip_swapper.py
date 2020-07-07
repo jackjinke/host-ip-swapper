@@ -3,15 +3,16 @@ import dns.resolver as dns_resolver
 import socket
 from lightsail_ip_swapper.lightsail_helper import LightsailHelper
 from lightsail_ip_swapper.route53_helper import Route53Helper
+from typing import Dict
 
 
 class IPSwapper:
-    def __init__(self, hosted_zone_id, aws_region, aws_credentials):
+    def __init__(self, hosted_zone_id: str, aws_region: str, aws_credentials: Dict[str, str]) -> None:
         self.hosted_zone_id = hosted_zone_id
         self.aws_region = aws_region
         self.aws_credentials = aws_credentials
 
-    def swap_to_reachable_ip(self, dns, port, force_swap=False, health_check_timeout=5):
+    def swap_to_reachable_ip(self, dns: str, port: int, force_swap=False, health_check_timeout=5) -> str:
         ip = str(dns_resolver.query(dns, 'A')[0])
         print('Found IP {} for DNS {}'.format(ip, dns))
 
@@ -51,7 +52,7 @@ class IPSwapper:
         return ip
 
 
-def is_ip_port_open(ip, port, timeout):
+def is_ip_port_open(ip: str, port: int, timeout: int) -> bool:
     print("Testing connection to {}:{}".format(ip, port))
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.settimeout(timeout)

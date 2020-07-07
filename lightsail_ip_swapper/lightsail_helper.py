@@ -2,11 +2,13 @@ import boto3
 from botocore.exceptions import ClientError
 import random
 import string
+import time
+from typing import Tuple, Dict
 
 
 class LightsailHelper:
 
-    def __init__(self, region, credentials):
+    def __init__(self, region: str, credentials: Dict[str, str]):
         self.client = boto3.client(
             'lightsail',
             aws_access_key_id=credentials['public_key'],
@@ -15,7 +17,7 @@ class LightsailHelper:
         )
         self.unused_ip_names = []
 
-    def get_lightsail_info_from_ip(self, ip):
+    def get_lightsail_info_from_ip(self, ip: str) -> Tuple[str, str]:
         response = self.client.get_static_ips()
         all_static_ips = response['staticIps']
         while 'nextPageToken' in response:
@@ -29,8 +31,8 @@ class LightsailHelper:
         # If not returned at this point, no static IP found that matches the input IP
         raise RuntimeError('IP {} not found in Lightsail. Please check and update DNS manually'.format(ip))
 
-    def swap_ip(self, static_ip_name, instance_name):
-        new_ip_name = 'StaticIp-' + get_random_string()
+    def swap_ip(self, static_ip_name: str, instance_name: str) -> Tuple[str, str]:
+        new_ip_name = 'StaticIp-{}-{}'.format(int(time.time()), get_random_string())
         try:
             print('Requesting new static IP with name "{}"'.format(new_ip_name))
             self.client.allocate_static_ip(
@@ -53,7 +55,7 @@ class LightsailHelper:
             self.unused_ip_names += [new_ip_name]
             raise error
 
-    def release_all_unused_ips(self):
+    def release_all_unused_ips(self) -> None:
         print('Releasing all unused Lightsail static IPs created during the swap, total count:',
               len(self.unused_ip_names))
         for ip_name in self.unused_ip_names:
@@ -68,6 +70,6 @@ class LightsailHelper:
         self.unused_ip_names = []
 
 
-def get_random_string(length=8):
+def get_random_string(length=8) -> str:
     charset = string.ascii_letters + string.digits
-    return ''.join((random.choice(charset) for i in range(length)))
+    return ''.join((random.choice(charset) for _ in range(length)))
