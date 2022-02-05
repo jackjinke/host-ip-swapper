@@ -1,16 +1,14 @@
 # -*- coding: utf8 -*-
 import dns.resolver as dns_resolver
 import socket
-from lightsail_ip_swapper.lightsail_helper import LightsailHelper
-from lightsail_ip_swapper.route53_helper import Route53Helper
-from typing import Dict
+from host_ip_swapper.dns.dns_helper_interface import DnsHelperInterface
+from host_ip_swapper.host.host_helper_interface import HostHelperInterface
 
 
 class IPSwapper:
-    def __init__(self, hosted_zone_id: str, aws_region: str, aws_credentials: Dict[str, str]) -> None:
-        self.hosted_zone_id = hosted_zone_id
-        self.aws_region = aws_region
-        self.aws_credentials = aws_credentials
+    def __init__(self, host_helper: HostHelperInterface, dns_helper: DnsHelperInterface) -> None:
+        self.host_helper = host_helper
+        self.dns_helper = dns_helper
 
     def swap_to_reachable_ip(self, dns: str, port: int, force_swap=False, health_check_timeout=5) -> str:
         ip = str(dns_resolver.query(dns, 'A')[0])
@@ -27,13 +25,12 @@ class IPSwapper:
             else:
                 print('Initial IP {} is not reachable'.format(ip))
 
-        lightsail_helper = LightsailHelper(region=self.aws_region, credentials=self.aws_credentials)
-        lightsail_ip_name, lightsail_instance_name = lightsail_helper.get_lightsail_info_from_ip(ip)
+        host_info = self.host_helper.get_host_info(ip)
         try:
             # Keep swapping static IP until we get a reachable one
             while not ip_reachable:
                 print('IP {} is not reachable; replacing it with a new one'.format(ip))
-                lightsail_ip_name, ip = lightsail_helper.swap_ip(lightsail_ip_name, lightsail_instance_name)
+                ip, host_info = self.host_helper.swap_ip(host_info)
                 ip_reachable = is_ip_port_open(ip, port, health_check_timeout)
             print('IP {} is reachable'.format(ip))
         finally:
@@ -42,12 +39,11 @@ class IPSwapper:
             # Regardless of the result of the loop, we want to remove all the unused static IPs (avoid charges)
             try:
                 print('Updating DNS record {} with IP {}'.format(dns, ip))
-                r53_helper = Route53Helper(region=self.aws_region, credentials=self.aws_credentials)
-                r53_helper.update_dns_with_ip(self.hosted_zone_id, dns, ip)
+                self.dns_helper.update_dns_with_ip(dns, ip)
             finally:
-                # Release the IPs after we get the reachable IP
+                # Do the clean up e.g. release the unused IPs
                 # Do this after we get a reachable IP to prevent getting the same IP while we're requesting new ones
-                lightsail_helper.release_all_unused_ips()
+                self.host_helper.clean_up()
             print('Swap complete, final IP:', ip)
         return ip
 

@@ -1,13 +1,22 @@
 # -*- coding: utf8 -*-
 import os
-from lightsail_ip_swapper.ip_swapper import IPSwapper
+
+from host_ip_swapper.dns.cloudflare_helper import CloudFlareHelper
+from host_ip_swapper.dns.route53_helper import Route53Helper
+from host_ip_swapper.host.lightsail_helper import LightsailHelper
+from host_ip_swapper.ip_swapper import IPSwapper
 
 AWS_REGION = os.getenv('AWS_REGION')
 AWS_CREDENTIAL_PUBLIC_KEY = os.getenv('AWS_CREDENTIAL_PUBLIC_KEY')
 AWS_CREDENTIAL_SECRET_KEY = os.getenv('AWS_CREDENTIAL_SECRET_KEY')
-AWS_HOSTED_ZONE_ID = os.getenv('AWS_HOSTED_ZONE_ID')
 
+DNS_PROVIDER = os.getenv('DNS_PROVIDER')
+DNS_ZONE_ID = os.getenv('DNS_ZONE_ID')
 DNS_NAME = os.getenv('DNS_NAME')
+
+CLOUDFLARE_EMAIL = os.getenv('CLOUDFLARE_EMAIL')
+CLOUDFLARE_API_KEY = os.getenv('CLOUDFLARE_API_KEY')
+
 OPEN_PORT = os.getenv('OPEN_PORT')
 
 HEALTH_CHECK_TIMEOUT = os.getenv('HEALTH_CHECK_TIMEOUT')
@@ -23,14 +32,29 @@ def main_handler(event, context):
             DEFAULT_HEALTH_CHECK_TIMEOUT
         ))
         health_check_timeout = DEFAULT_HEALTH_CHECK_TIMEOUT
-    ip_swapper = IPSwapper(
-        aws_region=AWS_REGION,
-        aws_credentials={
-            'public_key': AWS_CREDENTIAL_PUBLIC_KEY,
-            'secret_key': AWS_CREDENTIAL_SECRET_KEY
-        },
-        hosted_zone_id=AWS_HOSTED_ZONE_ID
+
+    # Supported host providers: LIGHTSAIL
+    host_helper = LightsailHelper(
+        region=AWS_REGION,
+        access_key=AWS_CREDENTIAL_PUBLIC_KEY,
+        secret_key=AWS_CREDENTIAL_SECRET_KEY
     )
+
+    # Supported DNS providers: ROUTE53, CLOUDFLARE
+    # TODO: Switch to match syntax in Python 3.10+
+    if DNS_PROVIDER == 'ROUTE53':
+        dns_helper = Route53Helper(
+            hosted_zone_id=DNS_ZONE_ID,
+            region=AWS_REGION,
+            access_key=AWS_CREDENTIAL_PUBLIC_KEY,
+            secret_key=AWS_CREDENTIAL_SECRET_KEY
+        )
+    elif DNS_PROVIDER == 'CLOUDFLARE':
+        dns_helper = CloudFlareHelper(zone_id=DNS_ZONE_ID, email=CLOUDFLARE_EMAIL, api_key=CLOUDFLARE_API_KEY)
+    else:
+        raise ValueError('Invalid or unsupported DNS provider')
+
+    ip_swapper = IPSwapper(host_helper=host_helper, dns_helper=dns_helper)
     ip = ip_swapper.swap_to_reachable_ip(
         DNS_NAME,
         int(OPEN_PORT),

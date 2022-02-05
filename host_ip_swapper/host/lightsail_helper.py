@@ -3,21 +3,27 @@ from botocore.exceptions import ClientError
 import random
 import string
 import time
-from typing import Tuple, Dict
+from typing import Dict
+from host_ip_swapper.host.host_helper_interface import HostHelperInterface
 
 
-class LightsailHelper:
+class LightsailHostInfo(Dict):
+    # TODO: Switch to TypedDict in Python 3.8+
+    instance_name: str
+    static_ip_name: str
 
-    def __init__(self, region: str, credentials: Dict[str, str]):
+
+class LightsailHelper(HostHelperInterface):
+    def __init__(self, region: str, access_key: str, secret_key: str):
         self.client = boto3.client(
             'lightsail',
-            aws_access_key_id=credentials['public_key'],
-            aws_secret_access_key=credentials['secret_key'],
+            aws_access_key_id=access_key,
+            aws_secret_access_key=secret_key,
             region_name=region
         )
         self.unused_ip_names = []
 
-    def get_lightsail_info_from_ip(self, ip: str) -> Tuple[str, str]:
+    def get_host_info(self, ip: str) -> LightsailHostInfo:
         response = self.client.get_static_ips()
         all_static_ips = response['staticIps']
         while 'nextPageToken' in response:
@@ -27,11 +33,12 @@ class LightsailHelper:
             if static_ip_obj['ipAddress'] == ip:
                 static_ip_name = static_ip_obj['name']
                 instance_name = static_ip_obj['attachedTo']
-                return static_ip_name, instance_name
+                return {'instance_name': instance_name, 'static_ip_name': static_ip_name}
         # If not returned at this point, no static IP found that matches the input IP
         raise RuntimeError('IP {} not found in Lightsail. Please check and update DNS manually'.format(ip))
 
-    def swap_ip(self, static_ip_name: str, instance_name: str) -> Tuple[str, str]:
+    def swap_ip(self, host_info: LightsailHostInfo) -> (str, LightsailHostInfo):
+        instance_name = host_info['instance_name']
         new_ip_name = 'StaticIp-{}-{}'.format(int(time.time()), get_random_string())
         try:
             print('Requesting new static IP with name "{}"'.format(new_ip_name))
@@ -47,15 +54,15 @@ class LightsailHelper:
                 instanceName=instance_name
             )
             print('IP {} successfully attached to instance "{}"'.format(new_ip, instance_name))
-            self.unused_ip_names += [static_ip_name]
-            return new_ip_name, new_ip
+            self.unused_ip_names += [host_info['static_ip_name']]
+            return new_ip, {'instance_name': instance_name, 'static_ip_name': new_ip_name}
         except ClientError as error:
             print(error)
             print('Adding unattached IP "{}" into pending deletion queue'.format(new_ip_name))
             self.unused_ip_names += [new_ip_name]
             raise error
 
-    def release_all_unused_ips(self) -> None:
+    def clean_up(self) -> None:
         print('Releasing all unused Lightsail static IPs created during the swap, total count:',
               len(self.unused_ip_names))
         for ip_name in self.unused_ip_names:
