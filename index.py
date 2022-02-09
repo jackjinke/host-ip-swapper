@@ -3,6 +3,7 @@ import os
 
 from host_ip_swapper.dns.cloudflare_helper import CloudFlareHelper
 from host_ip_swapper.dns.route53_helper import Route53Helper
+from host_ip_swapper.health_check.open_port_checker import OpenPortChecker
 from host_ip_swapper.host.lightsail_helper import LightsailHelper
 from host_ip_swapper.ip_swapper import IPSwapper
 
@@ -40,6 +41,8 @@ def main_handler(event, context):
         secret_key=AWS_CREDENTIAL_SECRET_KEY
     )
 
+    health_checker = OpenPortChecker(timeout=health_check_timeout)
+
     # Supported DNS providers: ROUTE53, CLOUDFLARE
     # TODO: Switch to match syntax in Python 3.10+
     if DNS_PROVIDER == 'ROUTE53':
@@ -54,12 +57,11 @@ def main_handler(event, context):
     else:
         raise ValueError('Invalid or unsupported DNS provider')
 
-    ip_swapper = IPSwapper(host_helper=host_helper, dns_helper=dns_helper)
+    ip_swapper = IPSwapper(host_helper=host_helper, health_checker=health_checker, dns_helper=dns_helper)
     ip = ip_swapper.swap_to_reachable_ip(
         DNS_NAME,
         int(OPEN_PORT),
-        force_swap=force_swap,
-        health_check_timeout=health_check_timeout
+        force_swap=force_swap
     )
     return {
         "dns": DNS_NAME,
