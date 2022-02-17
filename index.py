@@ -1,5 +1,6 @@
 # -*- coding: utf8 -*-
 import os
+import logging
 
 from host_ip_swapper.dns.cloudflare_helper import CloudFlareHelper
 from host_ip_swapper.dns.route53_helper import Route53Helper
@@ -25,6 +26,8 @@ DEFAULT_HEALTH_CHECK_TIMEOUT = 5
 
 
 def main_handler(event, context):
+    config_logger()
+
     force_swap = event['force_swap'].lower() == 'true' if 'force_swap' in event else False
     try:
         health_check_timeout = int(HEALTH_CHECK_TIMEOUT)
@@ -67,3 +70,8 @@ def main_handler(event, context):
         "dns": DNS_NAME,
         "ip": ip
     }
+
+
+def config_logger():
+    logging.getLogger('botocore').setLevel(logging.WARN)
+    logging.getLogger('boto3').setLevel(logging.WARN)
