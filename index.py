@@ -1,6 +1,8 @@
 # -*- coding: utf8 -*-
 import os
 import logging
+import json
+import collections
 
 from host_ip_swapper.dns.cloudflare_helper import CloudFlareHelper
 from host_ip_swapper.dns.route53_helper import Route53Helper
@@ -27,8 +29,13 @@ DEFAULT_HEALTH_CHECK_TIMEOUT = 5
 
 def main_handler(event, context):
     config_logger()
+    
+    if isinstance(event, collections.Mapping):
+        event_dict = event
+    else:
+        event_dict = json.loads(event.decode('utf-8'))
 
-    force_swap = event['force_swap'].lower() == 'true' if 'force_swap' in event else False
+    force_swap = event_dict['force_swap'].lower() == 'true' if 'force_swap' in event_dict else False
     try:
         health_check_timeout = int(HEALTH_CHECK_TIMEOUT)
     except (TypeError, ValueError):
