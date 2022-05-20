@@ -9,5 +9,5 @@ setup(
     author='jackjinke',
     author_email='jack.kejin@gmail.com',
     description='Check the reachability of host, then swap the static IP and update DNS if needed.',
-    python_requires='>=3.6'
+    python_requires='>=3.9'
 )
