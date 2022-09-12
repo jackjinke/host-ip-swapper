@@ -3,12 +3,11 @@ from botocore.exceptions import ClientError
 import random
 import string
 import time
-from typing import Dict
+from typing import TypedDict
 from host_ip_swapper.host.host_helper_interface import HostHelperInterface
 
 
-class LightsailHostInfo(Dict):
-    # TODO: Switch to TypedDict in Python 3.8+
+class LightsailHostInfo(TypedDict):
     instance_name: str
     static_ip_name: str
 

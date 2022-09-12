@@ -25,7 +25,11 @@ OPEN_PORT = os.getenv('OPEN_PORT')
 
 HEALTH_CHECK_TIMEOUT = os.getenv('HEALTH_CHECK_TIMEOUT')
 DEFAULT_HEALTH_CHECK_TIMEOUT = 5
+HEALTH_CHECK_MAX_RETRY = os.getenv('HEALTH_CHECK_MAX_RETRY')
+DEFAULT_HEALTH_CHECK_MAX_RETRY = 3
 
+HOST_IP_SWAP_MAX_RETRY = os.getenv('HOST_IP_SWAP_MAX_RETRY')
+DEFAULT_HOST_IP_SWAP_MAX_RETRY = 3
 
 def main_handler(event, context):
     config_logger()
@@ -43,6 +47,20 @@ def main_handler(event, context):
             DEFAULT_HEALTH_CHECK_TIMEOUT
         ))
         health_check_timeout = DEFAULT_HEALTH_CHECK_TIMEOUT
+    try:
+        health_check_max_retry = int(HEALTH_CHECK_MAX_RETRY)
+    except (TypeError, ValueError):
+        print('No valid HEALTH_CHECK_MAX_RETRY value found; using default setting of {} time(s)'.format(
+            DEFAULT_HEALTH_CHECK_MAX_RETRY
+        ))
+        health_check_max_retry = DEFAULT_HEALTH_CHECK_MAX_RETRY
+    try:
+        host_ip_swap_max_retry = int(HOST_IP_SWAP_MAX_RETRY)
+    except (TypeError, ValueError):
+        print('No valid HOST_IP_SWAP_MAX_RETRY value found; using default setting of {} time(s)'.format(
+            DEFAULT_HOST_IP_SWAP_MAX_RETRY
+        ))
+        host_ip_swap_max_retry = DEFAULT_HOST_IP_SWAP_MAX_RETRY
 
     # Supported host providers: LIGHTSAIL
     host_helper = LightsailHelper(
@@ -51,7 +69,10 @@ def main_handler(event, context):
         secret_key=AWS_CREDENTIAL_SECRET_KEY
     )
 
-    health_checker = OpenPortChecker(timeout=health_check_timeout)
+    health_checker = OpenPortChecker(
+        timeout=health_check_timeout,
+        max_retry=health_check_max_retry
+    )
 
     # Supported DNS providers: ROUTE53, CLOUDFLARE
     # TODO: Switch to match syntax in Python 3.10+
@@ -67,12 +88,19 @@ def main_handler(event, context):
     else:
         raise ValueError('Invalid or unsupported DNS provider')
 
-    ip_swapper = IPSwapper(host_helper=host_helper, health_checker=health_checker, dns_helper=dns_helper)
-    ip = ip_swapper.swap_to_reachable_ip(
+    ip_swapper = IPSwapper(
+        host_helper=host_helper,
+        health_checker=health_checker,
+        dns_helper=dns_helper,
+        max_retry=host_ip_swap_max_retry
+    )
+    ip, success = ip_swapper.swap_to_reachable_ip(
         DNS_NAME,
         int(OPEN_PORT),
         force_swap=force_swap
     )
+    if not success:
+        raise Exception(f'Failed to swap to a reachable IP. Final IP: {ip}, DNS: {DNS_NAME}')
     return {
         "dns": DNS_NAME,
         "ip": ip
