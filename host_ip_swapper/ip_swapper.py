@@ -26,12 +26,11 @@ class IPSwapper:
 
         if force_swap:
             print('Force swap enabled; IP will be swapped at lease once')
-            ip_reachable = False
         else:
             ip_reachable = self.health_checker.is_healthy(ip, port)
             if ip_reachable:
                 print('Current IP {} in DNS {} is reachable; no swap needed'.format(dns, ip))
-                return ip
+                return ip, True
             else:
                 print('Initial IP {} is not reachable'.format(ip))
 
