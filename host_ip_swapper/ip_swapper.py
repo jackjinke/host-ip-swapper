@@ -38,8 +38,8 @@ class IPSwapper:
         success = False
         try:
             # Keep swapping static IP until we get a reachable one
-            for _ in range(self.max_retry):
-                print('IP {} is not reachable; replacing it with a new one'.format(ip))
+            for i in range(self.max_retry):
+                print(f'IP {ip} is not reachable; replacing it with a new one (#{i + 1}/{self.max_retry})')
                 ip, host_info = self.host_helper.swap_ip(host_info)
                 if self.health_checker.is_healthy(ip, port):
                     print('IP {} is reachable'.format(ip))
@@ -56,7 +56,5 @@ class IPSwapper:
                 # Clean up e.g. release the unused IPs
                 # Do this after we get a reachable IP to prevent getting the same IP while we're requesting new ones
                 self.host_helper.clean_up()
-            print('Swap complete, final IP:', ip)
-            if not success:
-                print('Reached max retry count but final IP {} is not reachable'.format(ip))
+            print(f'Swap finished, final IP: {ip}, status: {success}')
             return ip, success
