@@ -35,6 +35,7 @@ class IPSwapper:
                 print('Initial IP {} is not reachable'.format(ip))
 
         host_info = self.host_helper.get_host_info(ip)
+        success = False
         try:
             # Keep swapping static IP until we get a reachable one
             for _ in range(self.max_retry):
@@ -42,7 +43,8 @@ class IPSwapper:
                 ip, host_info = self.host_helper.swap_ip(host_info)
                 if self.health_checker.is_healthy(ip, port):
                     print('IP {} is reachable'.format(ip))
-                    return ip, True
+                    success = True
+                    break
         finally:
             # If the loop succeed, we want to update the DNS record with this new reachable IP
             # If the loop failed, we still want the DNS record point to the current IP of the instance
@@ -55,5 +57,6 @@ class IPSwapper:
                 # Do this after we get a reachable IP to prevent getting the same IP while we're requesting new ones
                 self.host_helper.clean_up()
             print('Swap complete, final IP:', ip)
-            print('Reached max retry count but final IP {} is not reachable'.format(ip))
-            return ip, False
+            if not success:
+                print('Reached max retry count but final IP {} is not reachable'.format(ip))
+            return ip, success
