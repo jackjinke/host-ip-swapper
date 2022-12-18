@@ -21,7 +21,7 @@ class IPSwapper:
         Swap the IP on the target host to a reachable one.
         Returns the final IP after swapping and its reachability.
         """
-        ip = str(dns_resolver.query(dns, 'A')[0])
+        ip = str(dns_resolver.resolve(dns, 'A')[0])
         print('Found IP {} for DNS {}'.format(ip, dns))
 
         if force_swap:
