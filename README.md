@@ -15,7 +15,13 @@ Set the environment variables below, then run `host-ip-swapper` using its full p
 
 ### Cron
 
-For example, install this in the executing user's crontab, replacing the sample values:
+Cron does not inherit the shell environment, so variables exported in `~/.bashrc` or a profile are unavailable: the command reads configuration and credentials only from the environment it is started with. Provide every variable in the crontab itself, or source a root-only environment file as shown below.
+
+```cron
+*/5 * * * * set -a; . /etc/host-ip-swapper/environment; set +a; /usr/bin/flock -n /opt/host-ip-swapper/run.lock /opt/host-ip-swapper/venv/bin/host-ip-swapper
+```
+
+An equivalent crontab that declares the variables directly looks like this, and must also repeat any notification variables such as `SERVERCHAN_ENABLED` and `SERVERCHAN_SENDKEY`, otherwise notifications are silently disabled:
 
 ```cron
 AWS_REGION=us-west-2
@@ -27,7 +33,9 @@ HOST_INSTANCE_NAME=YOUR_INSTANCE_NAME
 */5 * * * * /usr/bin/flock -n /opt/host-ip-swapper/run.lock /opt/host-ip-swapper/venv/bin/host-ip-swapper
 ```
 
-The executing user must be able to create the lock file; `flock` must be installed. Use the same lock for manual invocations and any other local schedules. This prevents local overlap only: do not schedule the same instance on another machine or cloud function concurrently. A systemd oneshot service with a five-minute timer is another option; starting the same service while it is active does not launch another copy.
+A wrapper script that `exec`s the command works too, but it must not rely on an inherited environment either. Missing configuration fails fast with a message such as `OPEN_PORT must be an integer between 1 and 65535` and exit status `1`.
+
+The executing user must be able to create the lock file, read and execute the virtual environment, and read the AWS profile it selects; a virtual environment installed under `umask 077` is root-only. `flock` must be installed. Use the same lock for manual invocations and any other local schedules. This prevents local overlap only: do not schedule the same instance on another machine or cloud function concurrently. A systemd oneshot service with a five-minute timer is another option; starting the same service while it is active does not launch another copy, and its `EnvironmentFile` entries are loaded without shell involvement.
 
 ## Generating the output ZIP file
 Use Python 3.10 or newer. Build with the same Python version, Linux platform and architecture as the function runtime because dependencies can include native extensions.
