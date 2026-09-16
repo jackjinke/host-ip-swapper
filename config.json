@@ -25,7 +25,7 @@
       },
       "download_address": "https://github.com/jackjinke/host-ip-swapper/tree/master",
       "tags": [
-        "Python3.6"
+        "Python3.10"
       ],
       "version": "1.0.0"
     },
@@ -34,7 +34,7 @@
       "description": "Swap host's static IP if needed",
       "handler": "index.main_handler",
       "memorySize": 512,
-      "timeout": 30,
+      "timeout": 900,
       "runtime": "Python3.10",
       "Environment": {
       },

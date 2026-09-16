@@ -1,5 +1,7 @@
 # Host IP Swapper
-A one-shot command and serverless function that checks a Lightsail instance's current public IPv4 and port, swaps an unreachable static IP, and updates its DNS A record.
+A one-shot command and serverless function that checks a host's public IPv4 address and port, replaces the address when it is unreachable, and reconciles its DNS A record.
+
+Host providers and DNS providers are separate seams: `host_ip_swapper/host/host_helper_interface.py` and `host_ip_swapper/dns/dns_helper_interface.py`. AWS Lightsail is the only host provider implemented so far, and Route53 and Cloudflare are the DNS providers. Details below that name Lightsail describe that implementation, not a limit of the tool.
 
 ## Installing the command
 
@@ -61,7 +63,7 @@ The command and cloud function use the same environment variables. The cloud ent
 | AWS_REGION                | AWS region the host lives in.                                         |
 | CLOUDFLARE_EMAIL          | (Only if using `CLOUDFLARE` as DNS provider) CloudFlare account email |
 | CLOUDFLARE_API_KEY        | (Only if using `CLOUDFLARE` as DNS provider) CloudFlare API key       |
-| HOST_INSTANCE_NAME        | Lightsail instance name; strongly recommended for scheduled functions |
+| HOST_INSTANCE_NAME        | Instance name for the host provider; required by Lightsail for recovery |
 | HEALTH_CHECK_MAX_RETRY    | TCP attempts per IP; default `3`                                      |
 | HOST_IP_SWAP_MAX_RETRY    | Maximum IP replacements per invocation; default `3`                   |
 | SERVERCHAN_ENABLED       | Set to `true` to enable ServerChan Turbo notifications; default off   |
@@ -69,15 +71,15 @@ The command and cloud function use the same environment variables. The cloud ent
 
 ## Scheduled execution and recovery
 
-- Set `HOST_INSTANCE_NAME` to the stable Lightsail instance name. Without it, the DNS provider's A record must match an attached static IP to identify the instance. With it, the next invocation can recover even if the previous invocation changed the IP but failed to update DNS.
-- Each invocation reads DNS through the provider API and reads the instance's actual public IP from Lightsail. Recursive DNS caches and Cloudflare proxy addresses are not used for health checks. A healthy instance with an outdated DNS record only needs a DNS update, not another IP replacement.
+- Set `HOST_INSTANCE_NAME` to the host provider's stable instance name; for Lightsail this is the instance name. Without it, the DNS provider's A record must match an attached static IP to identify the instance. With it, the next invocation can recover even if the previous invocation changed the IP but failed to update DNS.
+- Each invocation reads DNS through the DNS provider API and the host's actual public IP through the host provider API. Recursive DNS caches and Cloudflare proxy addresses are not used for health checks. A healthy host with an outdated DNS record only needs a DNS update, not another IP replacement.
 - The configured DNS name must have exactly one IPv4 A record. Route53 aliases, routing policies, health checks and multi-address records are rejected before swapping. Existing TTL and Cloudflare proxy settings are preserved.
-- Lightsail operations are awaited before checking a replacement IP. Cleanup verifies that each address is detached before releasing it. Cloud/API failures propagate so the invocation is reported as failed.
-- Configure concurrency to **one per instance**, including manual invocations. This function does not implement a distributed lock. Allow sufficient execution time for IP operations (each operation group can wait up to 120 seconds), TCP retries and DNS writes. A platform hard timeout can interrupt cleanup and leave detached static IPs requiring manual release.
+- Host provider operations are awaited before checking a replacement IP, and cleanup verifies that each address is detached before releasing it. With Lightsail, each awaited operation group can wait up to 120 seconds. Cloud/API failures propagate so the invocation is reported as failed.
+- Configure concurrency to **one per host**, including manual invocations. This function does not implement a distributed lock. Allow sufficient execution time for IP operations, TCP retries and DNS writes. A platform hard timeout can interrupt cleanup and leave detached static IPs requiring manual release. The command and cloud function share the same orchestration.
 - The default health-check timeout is 5 seconds. Invalid or nonpositive timeout/retry environment values use defaults. `OPEN_PORT` must be between 1 and 65535.
 - Events accept a JSON object, JSON string or JSON bytes. Use `{"force_swap": true}` to force at least one replacement; omit it for normal scheduled checks.
 
-Credentials need DNS record read/write permissions and Lightsail `GetStaticIps`, `GetStaticIp`, `GetInstance`, `GetOperation`, `AllocateStaticIp`, `AttachStaticIp`, and `ReleaseStaticIp`. When the legacy custom credential variables are absent, boto3 uses its standard credential chain, including standard AWS environment variables, the executing user's shared AWS profile (`AWS_PROFILE`), or an attached IAM role. Use the existing credential source rather than copying secrets into the package or crontab. Scheduled jobs must run as the intended user with the appropriate home/profile environment.
+Credentials need DNS record read/write permissions plus the host provider's read, allocate, attach and release permissions. For the Lightsail host provider those are `GetStaticIps`, `GetStaticIp`, `GetInstance`, `GetOperation`, `AllocateStaticIp`, `AttachStaticIp`, and `ReleaseStaticIp`. When the legacy custom credential variables are absent, boto3 uses its standard credential chain, including standard AWS environment variables, the executing user's shared AWS profile (`AWS_PROFILE`), or an attached IAM role. Use the existing credential source rather than copying secrets into the package or crontab. Scheduled jobs must run as the intended user with the appropriate home/profile environment.
 
 ## ServerChan notifications
 

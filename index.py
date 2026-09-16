@@ -133,7 +133,7 @@ def config_logger():
 
 def main(argv=None):
     parser = argparse.ArgumentParser(
-        description='Check a Lightsail host, replace an unreachable IP, and update DNS.')
+        description='Check a host, replace an unreachable IP, and update DNS.')
     parser.add_argument('--force-swap', action='store_true',
                         help='Replace the IP even when the current IP is reachable.')
     args = parser.parse_args(argv)
