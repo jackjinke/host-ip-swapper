@@ -35,7 +35,7 @@
       "handler": "index.main_handler",
       "memorySize": 512,
       "timeout": 30,
-      "runtime": "Python3.6",
+      "runtime": "Python3.10",
       "Environment": {
       },
       "Events": {

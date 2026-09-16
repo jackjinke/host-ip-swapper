@@ -3,7 +3,11 @@ class HostHelperInterface:
         """Fetch the host info and returns a dict with info needed for swapping its IP."""
         pass
 
-    def swap_ip(self, host_info: dict) -> (str, dict):
+    def get_current_ip(self, host_info: dict) -> str:
+        """Read the instance's current public IPv4 address from the host provider."""
+        raise NotImplementedError
+
+    def swap_ip(self, host_info: dict) -> tuple[str, dict]:
         """Swap the IP of the host. Returns the new IP and the host info dict after the swap.
         The input and output dict should both share the format of the output of get_host_info."""
         pass

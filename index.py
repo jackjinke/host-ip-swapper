@@ -1,8 +1,10 @@
 # -*- coding: utf8 -*-
 import os
+import argparse
 import logging
 import json
-import collections
+import sys
+from collections.abc import Mapping
 
 from host_ip_swapper.dns.cloudflare_helper import CloudFlareHelper
 from host_ip_swapper.dns.route53_helper import Route53Helper
@@ -34,14 +36,26 @@ DEFAULT_HOST_IP_SWAP_MAX_RETRY = 3
 def main_handler(event, context):
     config_logger()
     
-    if isinstance(event, collections.Mapping):
-        event_dict = event
-    else:
-        event_dict = json.loads(event.decode('utf-8'))
+    event_dict = event if isinstance(event, Mapping) else json.loads(event)
+    if not isinstance(event_dict, Mapping):
+        raise ValueError('Event must be a JSON object')
 
-    force_swap = event_dict['force_swap'].lower() == 'true' if 'force_swap' in event_dict else False
+    force_swap = event_dict.get('force_swap', False)
+    if isinstance(force_swap, str):
+        force_swap = force_swap.lower() == 'true'
+    elif not isinstance(force_swap, bool):
+        raise ValueError('force_swap must be a boolean or string')
+
+    try:
+        port = int(OPEN_PORT)
+    except (TypeError, ValueError):
+        raise ValueError('OPEN_PORT must be an integer between 1 and 65535') from None
+    if not 1 <= port <= 65535:
+        raise ValueError('OPEN_PORT must be an integer between 1 and 65535')
     try:
         health_check_timeout = int(HEALTH_CHECK_TIMEOUT)
+        if health_check_timeout <= 0:
+            raise ValueError
     except (TypeError, ValueError):
         print('No valid HEALTH_CHECK_TIMEOUT value found; using default setting of {} second(s)'.format(
             DEFAULT_HEALTH_CHECK_TIMEOUT
@@ -49,6 +63,8 @@ def main_handler(event, context):
         health_check_timeout = DEFAULT_HEALTH_CHECK_TIMEOUT
     try:
         health_check_max_retry = int(HEALTH_CHECK_MAX_RETRY)
+        if health_check_max_retry <= 0:
+            raise ValueError
     except (TypeError, ValueError):
         print('No valid HEALTH_CHECK_MAX_RETRY value found; using default setting of {} time(s)'.format(
             DEFAULT_HEALTH_CHECK_MAX_RETRY
@@ -56,6 +72,8 @@ def main_handler(event, context):
         health_check_max_retry = DEFAULT_HEALTH_CHECK_MAX_RETRY
     try:
         host_ip_swap_max_retry = int(HOST_IP_SWAP_MAX_RETRY)
+        if host_ip_swap_max_retry <= 0:
+            raise ValueError
     except (TypeError, ValueError):
         print('No valid HOST_IP_SWAP_MAX_RETRY value found; using default setting of {} time(s)'.format(
             DEFAULT_HOST_IP_SWAP_MAX_RETRY
@@ -66,7 +84,8 @@ def main_handler(event, context):
     host_helper = LightsailHelper(
         region=AWS_REGION,
         access_key=AWS_CREDENTIAL_PUBLIC_KEY,
-        secret_key=AWS_CREDENTIAL_SECRET_KEY
+        secret_key=AWS_CREDENTIAL_SECRET_KEY,
+        instance_name=os.getenv('HOST_INSTANCE_NAME')
     )
 
     health_checker = OpenPortChecker(
@@ -96,7 +115,7 @@ def main_handler(event, context):
     )
     ip, success = ip_swapper.swap_to_reachable_ip(
         DNS_NAME,
-        int(OPEN_PORT),
+        port,
         force_swap=force_swap
     )
     if not success:
@@ -110,3 +129,18 @@ def main_handler(event, context):
 def config_logger():
     logging.getLogger('botocore').setLevel(logging.WARN)
     logging.getLogger('boto3').setLevel(logging.WARN)
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(
+        description='Check a Lightsail host, replace an unreachable IP, and update DNS.')
+    parser.add_argument('--force-swap', action='store_true',
+                        help='Replace the IP even when the current IP is reachable.')
+    args = parser.parse_args(argv)
+    try:
+        result = main_handler({'force_swap': args.force_swap}, None)
+    except Exception as error:
+        print(f'host-ip-swapper: {error}', file=sys.stderr)
+        return 1
+    print(json.dumps(result))
+    return 0
