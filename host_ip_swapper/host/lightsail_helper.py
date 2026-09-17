@@ -3,17 +3,17 @@ from botocore.exceptions import ClientError
 import random
 import string
 import time
-from typing import TypedDict
 from host_ip_swapper.host.host_helper_interface import HostHelperInterface
 
 
-class LightsailHostInfo(TypedDict):
-    instance_name: str
-    static_ip_name: str
+LightsailHostInfo = dict[str, str]
 
 
 class LightsailHelper(HostHelperInterface):
-    def __init__(self, region: str, access_key: str, secret_key: str, instance_name=None):
+    def __init__(self, region: str, access_key: str, secret_key: str,
+                 instance_name=None, ip_version=4):
+        if ip_version not in (4, 6):
+            raise ValueError('ip_version must be 4 or 6')
         self.client = boto3.client(
             'lightsail',
             aws_access_key_id=access_key,
@@ -21,9 +21,26 @@ class LightsailHelper(HostHelperInterface):
             region_name=region
         )
         self.instance_name = instance_name
+        self.ip_version = ip_version
         self.unused_ip_names = []
 
     def get_host_info(self, ip: str) -> LightsailHostInfo:
+        if self.ip_version == 6:
+            if self.instance_name:
+                instance = self.client.get_instance(instanceName=self.instance_name)['instance']
+                return {'instance_name': instance['name']}
+            params = {}
+            while True:
+                response = self.client.get_instances(**params)
+                for instance in response['instances']:
+                    if ip in instance.get('ipv6Addresses', []):
+                        return {'instance_name': instance['name']}
+                token = response.get('nextPageToken')
+                if not token:
+                    break
+                params = {'pageToken': token}
+            raise RuntimeError('No Lightsail instance found with IPv6 address {}'.format(ip))
+
         params = {}
         while True:
             response = self.client.get_static_ips(**params)
@@ -41,6 +58,11 @@ class LightsailHelper(HostHelperInterface):
 
     def get_current_ip(self, host_info: LightsailHostInfo) -> str:
         instance = self.client.get_instance(instanceName=host_info['instance_name'])['instance']
+        if self.ip_version == 6:
+            addresses = instance.get('ipv6Addresses', [])
+            if len(addresses) != 1:
+                raise RuntimeError('Expected instance to have exactly one public IPv6 address')
+            return addresses[0]
         ip = instance.get('publicIpAddress')
         if not ip:
             raise RuntimeError('Instance has no public IPv4 address')
@@ -61,6 +83,9 @@ class LightsailHelper(HostHelperInterface):
                 operation = self.client.get_operation(operationId=operation['id'])['operation']
 
     def swap_ip(self, host_info: LightsailHostInfo) -> tuple[str, LightsailHostInfo]:
+        if self.ip_version == 6:
+            return self._swap_ipv6(host_info)
+
         instance_name = host_info['instance_name']
         new_ip_name = 'StaticIp-{}-{}'.format(int(time.time()), get_random_string())
         print('Requesting new static IP with name "{}"'.format(new_ip_name))
@@ -77,6 +102,28 @@ class LightsailHelper(HostHelperInterface):
         self.unused_ip_names.remove(new_ip_name)
         self.unused_ip_names.append(host_info['static_ip_name'])
         return new_ip, {'instance_name': instance_name, 'static_ip_name': new_ip_name}
+
+    def _swap_ipv6(self, host_info: LightsailHostInfo) -> tuple[str, LightsailHostInfo]:
+        instance_name = host_info['instance_name']
+        old_ip = self.get_current_ip(host_info)
+        print('Disabling IPv6 on instance "{}"'.format(instance_name))
+        self._wait_for_operations(self.client.set_ip_address_type(
+            resourceType='Instance', resourceName=instance_name, ipAddressType='ipv4'
+        ))
+        print('Enabling IPv6 on instance "{}"'.format(instance_name))
+        try:
+            self._wait_for_operations(self.client.set_ip_address_type(
+                resourceType='Instance', resourceName=instance_name, ipAddressType='dualstack'
+            ))
+        except Exception:
+            # A failed or ambiguous request must not leave the instance IPv4-only.
+            self._wait_for_operations(self.client.set_ip_address_type(
+                resourceType='Instance', resourceName=instance_name, ipAddressType='dualstack'
+            ))
+        new_ip = self.get_current_ip(host_info)
+        if new_ip == old_ip:
+            raise RuntimeError('Lightsail IPv6 replacement completed but address did not change')
+        return new_ip, host_info
 
     def clean_up(self) -> None:
         failures = []

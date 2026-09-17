@@ -6,6 +6,7 @@ import json
 import sys
 from collections.abc import Mapping
 
+from host_ip_swapper.address_mode import AddressMode, ForceSwapMode
 from host_ip_swapper.dns.cloudflare_helper import CloudFlareHelper
 from host_ip_swapper.dns.route53_helper import Route53Helper
 from host_ip_swapper.health_check.open_port_checker import OpenPortChecker
@@ -19,6 +20,7 @@ AWS_CREDENTIAL_SECRET_KEY = os.getenv('AWS_CREDENTIAL_SECRET_KEY')
 DNS_PROVIDER = os.getenv('DNS_PROVIDER')
 DNS_ZONE_ID = os.getenv('DNS_ZONE_ID')
 DNS_NAME = os.getenv('DNS_NAME')
+IP_MODE = os.getenv('IP_MODE', AddressMode.DUALSTACK.value)
 
 CLOUDFLARE_EMAIL = os.getenv('CLOUDFLARE_EMAIL')
 CLOUDFLARE_API_KEY = os.getenv('CLOUDFLARE_API_KEY')
@@ -35,16 +37,21 @@ DEFAULT_HOST_IP_SWAP_MAX_RETRY = 3
 
 def main_handler(event, context):
     config_logger()
-    
+
     event_dict = event if isinstance(event, Mapping) else json.loads(event)
     if not isinstance(event_dict, Mapping):
         raise ValueError('Event must be a JSON object')
 
-    force_swap = event_dict.get('force_swap', False)
-    if isinstance(force_swap, str):
-        force_swap = force_swap.lower() == 'true'
-    elif not isinstance(force_swap, bool):
-        raise ValueError('force_swap must be a boolean or string')
+    try:
+        address_mode = AddressMode(IP_MODE)
+    except ValueError:
+        raise ValueError('IP_MODE must be v4-only, v6-only, or dualstack') from None
+    try:
+        force_swap = ForceSwapMode(event_dict.get('force_swap', ForceSwapMode.OFF.value))
+    except ValueError:
+        raise ValueError('force_swap must be off, v4, v6, or both') from None
+    if not set(force_swap.families).issubset(address_mode.families):
+        raise ValueError('force_swap targets an address family disabled by IP_MODE')
 
     try:
         port = int(OPEN_PORT)
@@ -80,49 +87,55 @@ def main_handler(event, context):
         ))
         host_ip_swap_max_retry = DEFAULT_HOST_IP_SWAP_MAX_RETRY
 
-    # Supported host providers: LIGHTSAIL
-    host_helper = LightsailHelper(
-        region=AWS_REGION,
-        access_key=AWS_CREDENTIAL_PUBLIC_KEY,
-        secret_key=AWS_CREDENTIAL_SECRET_KEY,
-        instance_name=os.getenv('HOST_INSTANCE_NAME')
-    )
-
     health_checker = OpenPortChecker(
         timeout=health_check_timeout,
         max_retry=health_check_max_retry
     )
-
-    # Supported DNS providers: ROUTE53, CLOUDFLARE
-    # TODO: Switch to match syntax in Python 3.10+
-    if DNS_PROVIDER == 'ROUTE53':
-        dns_helper = Route53Helper(
-            hosted_zone_id=DNS_ZONE_ID,
+    addresses = {}
+    for ip_version in address_mode.families:
+        host_helper = LightsailHelper(
             region=AWS_REGION,
             access_key=AWS_CREDENTIAL_PUBLIC_KEY,
-            secret_key=AWS_CREDENTIAL_SECRET_KEY
+            secret_key=AWS_CREDENTIAL_SECRET_KEY,
+            instance_name=os.getenv('HOST_INSTANCE_NAME'),
+            ip_version=ip_version
         )
-    elif DNS_PROVIDER == 'CLOUDFLARE':
-        dns_helper = CloudFlareHelper(zone_id=DNS_ZONE_ID, email=CLOUDFLARE_EMAIL, api_key=CLOUDFLARE_API_KEY)
-    else:
-        raise ValueError('Invalid or unsupported DNS provider')
 
-    ip_swapper = IPSwapper(
-        host_helper=host_helper,
-        health_checker=health_checker,
-        dns_helper=dns_helper,
-        max_retry=host_ip_swap_max_retry
-    )
-    ip, success = ip_swapper.swap_to_reachable_ip(
-        DNS_NAME,
-        port,
-        force_swap=force_swap
-    )
-    if not success:
-        raise Exception(f'Failed to swap to a reachable IP. Final IP: {ip}, DNS: {DNS_NAME}')
+        if DNS_PROVIDER == 'ROUTE53':
+            dns_helper = Route53Helper(
+                hosted_zone_id=DNS_ZONE_ID,
+                region=AWS_REGION,
+                access_key=AWS_CREDENTIAL_PUBLIC_KEY,
+                secret_key=AWS_CREDENTIAL_SECRET_KEY,
+                ip_version=ip_version
+            )
+        elif DNS_PROVIDER == 'CLOUDFLARE':
+            dns_helper = CloudFlareHelper(
+                zone_id=DNS_ZONE_ID, email=CLOUDFLARE_EMAIL,
+                api_key=CLOUDFLARE_API_KEY, ip_version=ip_version
+            )
+        else:
+            raise ValueError('Invalid or unsupported DNS provider')
+
+        ip, success = IPSwapper(
+            host_helper=host_helper,
+            health_checker=health_checker,
+            dns_helper=dns_helper,
+            max_retry=host_ip_swap_max_retry
+        ).swap_to_reachable_ip(
+            DNS_NAME,
+            port,
+            force_swap=force_swap.includes(ip_version)
+        )
+        addresses[f'v{ip_version}'] = ip
+        if not success:
+            raise Exception(
+                f'Failed to swap to a reachable IPv{ip_version} address. Final IP: {ip}, DNS: {DNS_NAME}'
+            )
+
     return {
-        "dns": DNS_NAME,
-        "ip": ip
+        'dns': DNS_NAME,
+        'addresses': addresses
     }
 
 
@@ -134,8 +147,10 @@ def config_logger():
 def main(argv=None):
     parser = argparse.ArgumentParser(
         description='Check a host, replace an unreachable IP, and update DNS.')
-    parser.add_argument('--force-swap', action='store_true',
-                        help='Replace the IP even when the current IP is reachable.')
+    parser.add_argument(
+        '--force-swap', choices=[mode.value for mode in ForceSwapMode], default=ForceSwapMode.OFF.value,
+        help='Force replacement for v4, v6, or both address families; default: off.'
+    )
     args = parser.parse_args(argv)
     try:
         result = main_handler({'force_swap': args.force_swap}, None)

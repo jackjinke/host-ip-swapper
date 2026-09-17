@@ -1,5 +1,5 @@
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 
 from botocore.exceptions import ClientError
 from host_ip_swapper.host.lightsail_helper import LightsailHelper
@@ -42,6 +42,46 @@ class LightsailTests(unittest.TestCase):
         self.assertEqual(info['instance_name'], 'server')
         self.client.get_operation.assert_called_once_with(operationId='attach')
         self.assertEqual(self.helper.unused_ip_names, ['old'])
+
+    def test_ipv6_swap_disables_then_reenables_dual_stack(self):
+        helper = LightsailHelper('region', 'key', 'secret', instance_name='server', ip_version=6)
+        self.client.get_instance.side_effect = [
+            {'instance': {'ipv6Addresses': ['2001:db8::1']}},
+            {'instance': {'ipv6Addresses': ['2001:db8::2']}},
+        ]
+        self.client.set_ip_address_type.return_value = DONE
+
+        ip, info = helper.swap_ip({'instance_name': 'server'})
+
+        self.assertEqual((ip, info), ('2001:db8::2', {'instance_name': 'server'}))
+        self.assertEqual(self.client.set_ip_address_type.call_args_list, [
+            call(resourceType='Instance', resourceName='server', ipAddressType='ipv4'),
+            call(resourceType='Instance', resourceName='server', ipAddressType='dualstack'),
+        ])
+
+    def test_ipv6_enable_failure_retries_to_avoid_ipv4_only_instance(self):
+        helper = LightsailHelper('region', 'key', 'secret', instance_name='server', ip_version=6)
+        self.client.get_instance.side_effect = [
+            {'instance': {'ipv6Addresses': ['2001:db8::1']}},
+            {'instance': {'ipv6Addresses': ['2001:db8::2']}},
+        ]
+        self.client.set_ip_address_type.side_effect = [DONE, RuntimeError('ambiguous'), DONE]
+
+        self.assertEqual(helper.swap_ip({'instance_name': 'server'})[0], '2001:db8::2')
+        self.assertEqual(self.client.set_ip_address_type.call_args_list[-2:], [
+            call(resourceType='Instance', resourceName='server', ipAddressType='dualstack'),
+            call(resourceType='Instance', resourceName='server', ipAddressType='dualstack'),
+        ])
+
+    def test_ipv6_instance_can_be_found_by_address(self):
+        helper = LightsailHelper('region', 'key', 'secret', ip_version=6)
+        self.client.get_instances.side_effect = [
+            {'instances': [], 'nextPageToken': 'next'},
+            {'instances': [{'name': 'server', 'ipv6Addresses': ['2001:db8::1']}]},
+        ]
+
+        self.assertEqual(helper.get_host_info('2001:db8::1'), {'instance_name': 'server'})
+        self.client.get_instances.assert_called_with(pageToken='next')
 
     def test_read_failure_after_allocation_releases_only_detached_ip(self):
         self.client.allocate_static_ip.return_value = DONE

@@ -1,4 +1,5 @@
 import unittest
+import socket
 from unittest.mock import MagicMock, patch
 
 from host_ip_swapper.health_check.open_port_checker import OpenPortChecker
@@ -17,6 +18,16 @@ class OpenPortCheckerTests(unittest.TestCase):
             self.assertTrue(OpenPortChecker(5, 3).is_healthy('192.0.2.1', 443))
         failed.__exit__.assert_called_once()
         succeeded.__exit__.assert_called_once()
+
+    def test_ipv6_uses_ipv6_socket(self):
+        connection = MagicMock()
+        connection.__enter__.return_value = connection
+        connection.connect_ex.return_value = 0
+        with patch('host_ip_swapper.health_check.open_port_checker.socket.socket',
+                   return_value=connection) as open_socket:
+            self.assertTrue(OpenPortChecker(5, 1).is_healthy('2001:db8::1', 443))
+        open_socket.assert_called_once_with(socket.AF_INET6, socket.SOCK_STREAM)
+        connection.connect_ex.assert_called_once_with(('2001:db8::1', 443))
 
     def test_socket_closes_when_connect_raises(self):
         connection = MagicMock()

@@ -1,7 +1,5 @@
 # Host IP Swapper
-A one-shot command and serverless function that checks a host's public IPv4 address and port, replaces the address when it is unreachable, and reconciles its DNS A record.
-
-Host providers and DNS providers are separate seams: `host_ip_swapper/host/host_helper_interface.py` and `host_ip_swapper/dns/dns_helper_interface.py`. AWS Lightsail is the only host provider implemented so far, and Route53 and Cloudflare are the DNS providers. Details below that name Lightsail describe that implementation, not a limit of the tool.
+A one-shot command and serverless function that checks a host's public addresses and port, replaces unreachable addresses, and reconciles its DNS records. It supports Lightsail with Route53 or Cloudflare.
 
 ## Installing the command
 
@@ -13,7 +11,7 @@ python3 -m venv /opt/host-ip-swapper/venv
 /opt/host-ip-swapper/venv/bin/host-ip-swapper --help
 ```
 
-Set the environment variables below, then run `host-ip-swapper` using its full path above. Each invocation performs one check/recovery cycle and exits. `--force-swap` forces at least one IP replacement. Successful execution prints the final DNS name and IP as JSON after any diagnostic output. Exit status is `0` on success, `1` on operational/configuration failure, and `2` for invalid command-line arguments.
+Set the environment variables below, then run `host-ip-swapper` using its full path above. Each invocation performs one check/recovery cycle and exits. Successful execution prints the final addresses as JSON after any diagnostic output. Exit status is `0` on success, `1` on operational/configuration failure, and `2` for invalid command-line arguments.
 
 ### Cron
 
@@ -30,6 +28,7 @@ AWS_REGION=us-west-2
 DNS_PROVIDER=ROUTE53
 DNS_ZONE_ID=YOUR_ZONE_ID
 DNS_NAME=host.example.com
+IP_MODE=dualstack
 OPEN_PORT=443
 HOST_INSTANCE_NAME=YOUR_INSTANCE_NAME
 */5 * * * * /usr/bin/flock -n /opt/host-ip-swapper/run.lock /opt/host-ip-swapper/venv/bin/host-ip-swapper
@@ -54,6 +53,7 @@ The command and cloud function use the same environment variables. The cloud ent
 | Env variable name         | Value                                                                 |
 |---------------------------|-----------------------------------------------------------------------|
 | DNS_NAME                  | Host name to check                                                    |
+| IP_MODE                   | `v4-only`, `v6-only`, or `dualstack` (default)                       |
 | OPEN_PORT                 | Port to check                                                         |
 | HEALTH_CHECK_TIMEOUT      | Health check timeout in seconds; default `5`                          |
 | DNS_PROVIDER              | `ROUTE53` / `CLOUDFLARE`                                              |
@@ -65,21 +65,18 @@ The command and cloud function use the same environment variables. The cloud ent
 | CLOUDFLARE_API_KEY        | (Only if using `CLOUDFLARE` as DNS provider) CloudFlare API key       |
 | HOST_INSTANCE_NAME        | Instance name for the host provider; required by Lightsail for recovery |
 | HEALTH_CHECK_MAX_RETRY    | TCP attempts per IP; default `3`                                      |
-| HOST_IP_SWAP_MAX_RETRY    | Maximum IP replacements per invocation; default `3`                   |
 | SERVERCHAN_ENABLED       | Set to `true` to enable ServerChan Turbo notifications; default off   |
 | SERVERCHAN_SENDKEY       | ServerChan Turbo SendKey; required for notifications                  |
 
-## Scheduled execution and recovery
+## Address modes and forced replacement
 
-- Set `HOST_INSTANCE_NAME` to the host provider's stable instance name; for Lightsail this is the instance name. Without it, the DNS provider's A record must match an attached static IP to identify the instance. With it, the next invocation can recover even if the previous invocation changed the IP but failed to update DNS.
-- Each invocation reads DNS through the DNS provider API and the host's actual public IP through the host provider API. Recursive DNS caches and Cloudflare proxy addresses are not used for health checks. A healthy host with an outdated DNS record only needs a DNS update, not another IP replacement.
-- The configured DNS name must have exactly one IPv4 A record. Route53 aliases, routing policies, health checks and multi-address records are rejected before swapping. Existing TTL and Cloudflare proxy settings are preserved.
-- Host provider operations are awaited before checking a replacement IP, and cleanup verifies that each address is detached before releasing it. With Lightsail, each awaited operation group can wait up to 120 seconds. Cloud/API failures propagate so the invocation is reported as failed.
-- Configure concurrency to **one per host**, including manual invocations. This function does not implement a distributed lock. Allow sufficient execution time for IP operations, TCP retries and DNS writes. A platform hard timeout can interrupt cleanup and leave detached static IPs requiring manual release. The command and cloud function share the same orchestration.
-- The default health-check timeout is 5 seconds. Invalid or nonpositive timeout/retry environment values use defaults. `OPEN_PORT` must be between 1 and 65535.
-- Events accept a JSON object, JSON string or JSON bytes. Use `{"force_swap": true}` to force at least one replacement; omit it for normal scheduled checks.
-
-Credentials need DNS record read/write permissions plus the host provider's read, allocate, attach and release permissions. For the Lightsail host provider those are `GetStaticIps`, `GetStaticIp`, `GetInstance`, `GetOperation`, `AllocateStaticIp`, `AttachStaticIp`, and `ReleaseStaticIp`. When the legacy custom credential variables are absent, boto3 uses its standard credential chain, including standard AWS environment variables, the executing user's shared AWS profile (`AWS_PROFILE`), or an attached IAM role. Use the existing credential source rather than copying secrets into the package or crontab. Scheduled jobs must run as the intended user with the appropriate home/profile environment.
+- `v4-only` checks and updates the A record. `v6-only` checks and updates the AAAA record. `dualstack` checks both, in IPv6 then IPv4 order.
+- Every selected family needs exactly one simple single-address record. Set `HOST_INSTANCE_NAME` so recovery works even if a DNS update fails.
+- By default, an address is replaced only when its port is unreachable. To replace a healthy address, set `force_swap` in the function event to `v4`, `v6`, or `both`. The force mode must be compatible with `IP_MODE`.
+- CLI usage: `host-ip-swapper --force-swap {off,v4,v6,both}`. The default is `off`.
+- Events accept a JSON object, JSON string, or JSON bytes. For example: `{"force_swap": "both"}`.
+- Configure concurrency to **one per host**, including manual invocations. This function does not implement a distributed lock.
+- Credentials need DNS record read/write permissions plus Lightsail read and address-management permissions. Standard boto3 credential sources are supported.
 
 ## ServerChan notifications
 

@@ -1,3 +1,4 @@
+from ipaddress import ip_address
 import socket
 from host_ip_swapper.health_check.health_checker_interface import HealthCheckerInterface
 
@@ -8,7 +9,8 @@ class OpenPortChecker(HealthCheckerInterface):
             raise ValueError('port must be an integer between 1 and 65535')
         for _ in range(self.max_retry):
             print("Checking if {}:{} is open...".format(ip, port))
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as connection:
+            family = socket.AF_INET if ip_address(ip).version == 4 else socket.AF_INET6
+            with socket.socket(family, socket.SOCK_STREAM) as connection:
                 connection.settimeout(self.timeout)
                 result = connection.connect_ex((ip, port))
                 if result == 0:

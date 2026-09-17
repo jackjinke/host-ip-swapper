@@ -25,6 +25,25 @@ class Route53Tests(unittest.TestCase):
             'ResourceRecords': [{'Value': '192.0.2.2'}]}}])
         self.assertEqual(self.record['ResourceRecords'], [{'Value': '192.0.2.1'}])
 
+    def test_ipv6_reads_and_updates_aaaa_record(self):
+        with patch('host_ip_swapper.dns.route53_helper.boto3.client') as client:
+            helper = Route53Helper('zone', 'region', 'key', 'secret', ip_version=6)
+        record = {'Name': 'host.example.', 'Type': 'AAAA', 'TTL': 300,
+                  'ResourceRecords': [{'Value': '2001:db8::1'}]}
+        client.return_value.list_resource_record_sets.return_value = {
+            'ResourceRecordSets': [record]}
+
+        self.assertEqual(helper.get_current_ip('host.example'), '2001:db8::1')
+        helper.update_dns_with_ip('host.example', '2001:db8::2')
+
+        client.return_value.list_resource_record_sets.assert_called_with(
+            HostedZoneId='zone', StartRecordName='host.example.',
+            StartRecordType='AAAA', MaxItems='2')
+        change = client.return_value.change_resource_record_sets.call_args.kwargs
+        self.assertEqual(change['ChangeBatch']['Changes'][0]['ResourceRecordSet']['Type'], 'AAAA')
+        self.assertEqual(change['ChangeBatch']['Changes'][0]['ResourceRecordSet']['ResourceRecords'],
+                         [{'Value': '2001:db8::2'}])
+
     def test_rejects_missing_neighbor_multiple_alias_and_routing_records(self):
         neighbor = dict(self.record, Name='other.example.')
         alias = {'Name': 'host.example.', 'Type': 'A', 'AliasTarget': {
@@ -80,6 +99,25 @@ class CloudflareTests(unittest.TestCase):
         self.helper.update_dns_with_ip('host.example', '192.0.2.2')
         self.assertEqual(self.record, dict(original, content='192.0.2.2'))
         self.records.put.assert_not_called()
+
+    def test_ipv6_reads_and_updates_aaaa_record(self):
+        with patch('host_ip_swapper.dns.cloudflare_helper.CloudFlare.CloudFlare') as client:
+            helper = CloudFlareHelper('zone', 'email', 'key', ip_version=6)
+        records = client.return_value.zones.dns_records
+        records.get.return_value = [{
+            'id': 'record', 'name': 'host.example', 'type': 'AAAA',
+            'content': '2001:db8::1', 'proxied': False, 'ttl': 300,
+        }]
+
+        self.assertEqual(helper.get_current_ip('host.example'), '2001:db8::1')
+        helper.update_dns_with_ip('host.example', '2001:db8::2')
+
+        records.get.assert_called_with('zone', params={
+            'name': 'host.example', 'match': 'all', 'type': 'AAAA',
+            'per_page': 2, 'page': 1,
+        })
+        records.patch.assert_called_once_with(
+            'zone', 'record', data={'content': '2001:db8::2'})
 
     def test_rejects_missing_multiple_and_nonmatching_records(self):
         for records in ([], [self.record, dict(self.record, id='second')],

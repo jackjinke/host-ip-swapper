@@ -11,6 +11,6 @@ setup(
     license='MIT',
     author='jackjinke',
     author_email='jack.kejin@gmail.com',
-    description='Check the reachability of host, then swap the static IP and update DNS if needed.',
+    description='Check host reachability, replace its public IP, and update DNS.',
     python_requires='>=3.10'
 )

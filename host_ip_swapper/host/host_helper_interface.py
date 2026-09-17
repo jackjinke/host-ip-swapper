@@ -4,7 +4,7 @@ class HostHelperInterface:
         pass
 
     def get_current_ip(self, host_info: dict) -> str:
-        """Read the instance's current public IPv4 address from the host provider."""
+        """Read the instance's current public address for the configured IP version."""
         raise NotImplementedError
 
     def swap_ip(self, host_info: dict) -> tuple[str, dict]:
