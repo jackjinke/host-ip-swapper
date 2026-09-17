@@ -103,24 +103,53 @@ class LightsailHelper(HostHelperInterface):
         self.unused_ip_names.append(host_info['static_ip_name'])
         return new_ip, {'instance_name': instance_name, 'static_ip_name': new_ip_name}
 
+    def _set_address_type(self, instance_name: str, address_type: str) -> None:
+        deadline = time.monotonic() + 120
+        while True:
+            try:
+                response = self.client.set_ip_address_type(
+                    resourceType='Instance', resourceName=instance_name, ipAddressType=address_type
+                )
+            except ClientError as error:
+                details = error.response['Error']
+                if (details['Code'] != 'OperationFailureException'
+                        or 'Another request is in progress' not in details.get('Message', '')
+                        or time.monotonic() >= deadline):
+                    raise
+                time.sleep(1)
+                continue
+            self._wait_for_operations(response)
+            return
+
+    def _wait_for_address_type(self, instance_name: str, address_type: str) -> dict:
+        deadline = time.monotonic() + 120
+        while True:
+            instance = self.client.get_instance(instanceName=instance_name)['instance']
+            addresses = instance.get('ipv6Addresses', [])
+            if instance.get('ipAddressType') == address_type:
+                if address_type == 'ipv4' and not addresses:
+                    return instance
+                if address_type == 'dualstack' and len(addresses) == 1:
+                    return instance
+            if time.monotonic() >= deadline:
+                raise TimeoutError('Timed out waiting for Lightsail instance {} to become {}'.format(
+                    instance_name, address_type))
+            time.sleep(1)
+
     def _swap_ipv6(self, host_info: LightsailHostInfo) -> tuple[str, LightsailHostInfo]:
         instance_name = host_info['instance_name']
         old_ip = self.get_current_ip(host_info)
-        print('Disabling IPv6 on instance "{}"'.format(instance_name))
-        self._wait_for_operations(self.client.set_ip_address_type(
-            resourceType='Instance', resourceName=instance_name, ipAddressType='ipv4'
-        ))
-        print('Enabling IPv6 on instance "{}"'.format(instance_name))
         try:
-            self._wait_for_operations(self.client.set_ip_address_type(
-                resourceType='Instance', resourceName=instance_name, ipAddressType='dualstack'
-            ))
-        except Exception:
-            # A failed or ambiguous request must not leave the instance IPv4-only.
-            self._wait_for_operations(self.client.set_ip_address_type(
-                resourceType='Instance', resourceName=instance_name, ipAddressType='dualstack'
-            ))
-        new_ip = self.get_current_ip(host_info)
+            print('Disabling IPv6 on instance "{}"'.format(instance_name))
+            self._set_address_type(instance_name, 'ipv4')
+            # Operation success can precede the actual networking transition.
+            self._wait_for_address_type(instance_name, 'ipv4')
+        finally:
+            # Restore networking even after an ambiguous disable failure.
+            print('Enabling IPv6 on instance "{}"'.format(instance_name))
+            self._set_address_type(instance_name, 'dualstack')
+            instance = self._wait_for_address_type(instance_name, 'dualstack')
+        new_ip = instance['ipv6Addresses'][0]
         if new_ip == old_ip:
             raise RuntimeError('Lightsail IPv6 replacement completed but address did not change')
         return new_ip, host_info

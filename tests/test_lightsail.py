@@ -47,31 +47,40 @@ class LightsailTests(unittest.TestCase):
         helper = LightsailHelper('region', 'key', 'secret', instance_name='server', ip_version=6)
         self.client.get_instance.side_effect = [
             {'instance': {'ipv6Addresses': ['2001:db8::1']}},
-            {'instance': {'ipv6Addresses': ['2001:db8::2']}},
+            {'instance': {'ipAddressType': 'dualstack', 'ipv6Addresses': ['2001:db8::1']}},
+            {'instance': {'ipAddressType': 'ipv4', 'ipv6Addresses': []}},
+            {'instance': {'ipAddressType': 'ipv4', 'ipv6Addresses': []}},
+            {'instance': {'ipAddressType': 'dualstack', 'ipv6Addresses': []}},
+            {'instance': {'ipAddressType': 'dualstack', 'ipv6Addresses': ['2001:db8::2']}},
         ]
-        self.client.set_ip_address_type.return_value = DONE
+        busy = ClientError({'Error': {
+            'Code': 'OperationFailureException',
+            'Message': 'Another request is in progress. Try again after that request has finished.',
+        }}, 'SetIpAddressType')
+        self.client.set_ip_address_type.side_effect = [DONE, busy, DONE]
 
-        ip, info = helper.swap_ip({'instance_name': 'server'})
+        with patch('host_ip_swapper.host.lightsail_helper.time.sleep'):
+            ip, info = helper.swap_ip({'instance_name': 'server'})
 
         self.assertEqual((ip, info), ('2001:db8::2', {'instance_name': 'server'}))
         self.assertEqual(self.client.set_ip_address_type.call_args_list, [
             call(resourceType='Instance', resourceName='server', ipAddressType='ipv4'),
             call(resourceType='Instance', resourceName='server', ipAddressType='dualstack'),
+            call(resourceType='Instance', resourceName='server', ipAddressType='dualstack'),
         ])
 
-    def test_ipv6_enable_failure_retries_to_avoid_ipv4_only_instance(self):
+    def test_ipv6_disable_failure_restores_networking_and_propagates(self):
         helper = LightsailHelper('region', 'key', 'secret', instance_name='server', ip_version=6)
         self.client.get_instance.side_effect = [
             {'instance': {'ipv6Addresses': ['2001:db8::1']}},
-            {'instance': {'ipv6Addresses': ['2001:db8::2']}},
+            {'instance': {'ipAddressType': 'dualstack', 'ipv6Addresses': ['2001:db8::2']}},
         ]
-        self.client.set_ip_address_type.side_effect = [DONE, RuntimeError('ambiguous'), DONE]
+        self.client.set_ip_address_type.side_effect = [RuntimeError('ambiguous disable'), DONE]
 
-        self.assertEqual(helper.swap_ip({'instance_name': 'server'})[0], '2001:db8::2')
-        self.assertEqual(self.client.set_ip_address_type.call_args_list[-2:], [
-            call(resourceType='Instance', resourceName='server', ipAddressType='dualstack'),
-            call(resourceType='Instance', resourceName='server', ipAddressType='dualstack'),
-        ])
+        with self.assertRaisesRegex(RuntimeError, 'ambiguous disable'):
+            helper.swap_ip({'instance_name': 'server'})
+        self.client.set_ip_address_type.assert_called_with(
+            resourceType='Instance', resourceName='server', ipAddressType='dualstack')
 
     def test_ipv6_instance_can_be_found_by_address(self):
         helper = LightsailHelper('region', 'key', 'secret', ip_version=6)
