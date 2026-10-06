@@ -75,6 +75,7 @@ The command and cloud function use the same environment variables. The cloud ent
 - By default, an address is replaced only when its port is unreachable. To replace a healthy address, set `force_swap` in the function event to `v4`, `v6`, or `both`. The force mode must be compatible with `IP_MODE`.
 - CLI usage: `host-ip-swapper --force-swap {off,v4,v6,both}`. The default is `off`.
 - Events accept a JSON object, JSON string, or JSON bytes. For example: `{"force_swap": "both"}`.
+- Lightsail address changes and static-IP attachment retry the specific “Another request is in progress” error once per second for up to 120 seconds. Attachment retries reuse the same allocation; other errors fail immediately. This wait is separate from the IP replacement attempt limit.
 - Configure concurrency to **one per host**, including manual invocations. This function does not implement a distributed lock.
 - Credentials need DNS record read/write permissions plus Lightsail read and address-management permissions. Standard boto3 credential sources are supported.
 

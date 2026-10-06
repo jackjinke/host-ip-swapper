@@ -33,7 +33,10 @@ class LightsailTests(unittest.TestCase):
     def test_attach_is_completed_before_ip_is_returned(self):
         self.client.allocate_static_ip.return_value = DONE
         self.client.get_static_ip.return_value = {'staticIp': {'ipAddress': '203.0.113.2'}}
-        self.client.attach_static_ip.return_value = {'operations': [{'id': 'attach', 'status': 'Started'}]}
+        busy = ClientError({'Error': {'Code': 'OperationFailureException',
+            'Message': 'Another request is in progress. Try again after that request has finished.'}}, 'AttachStaticIp')
+        self.client.attach_static_ip.side_effect = [busy,
+            {'operations': [{'id': 'attach', 'status': 'Started'}]}]
         self.client.get_operation.return_value = {'operation': {'id': 'attach', 'status': 'Succeeded'}}
         self.client.get_instance.return_value = {'instance': {'publicIpAddress': '203.0.113.2'}}
         with patch('host_ip_swapper.host.lightsail_helper.time.sleep'):
@@ -42,6 +45,10 @@ class LightsailTests(unittest.TestCase):
         self.assertEqual(info['instance_name'], 'server')
         self.client.get_operation.assert_called_once_with(operationId='attach')
         self.assertEqual(self.helper.unused_ip_names, ['old'])
+        self.client.allocate_static_ip.assert_called_once()
+        self.assertEqual(self.client.attach_static_ip.call_args_list, [
+            call(staticIpName=info['static_ip_name'], instanceName='server'),
+            call(staticIpName=info['static_ip_name'], instanceName='server')])
 
     def test_ipv6_swap_disables_then_reenables_dual_stack(self):
         helper = LightsailHelper('region', 'key', 'secret', instance_name='server', ip_version=6)

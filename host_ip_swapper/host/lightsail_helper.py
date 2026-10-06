@@ -94,9 +94,8 @@ class LightsailHelper(HostHelperInterface):
         self.unused_ip_names.append(new_ip_name)
         self._wait_for_operations(response)
         new_ip = self.client.get_static_ip(staticIpName=new_ip_name)['staticIp']['ipAddress']
-        self._wait_for_operations(self.client.attach_static_ip(
-            staticIpName=new_ip_name, instanceName=instance_name
-        ))
+        self._run_operation(self.client.attach_static_ip,
+                            staticIpName=new_ip_name, instanceName=instance_name)
         if self.get_current_ip(host_info) != new_ip:
             raise RuntimeError('Lightsail attachment completed but instance IP does not match')
         self.unused_ip_names.remove(new_ip_name)
@@ -104,12 +103,16 @@ class LightsailHelper(HostHelperInterface):
         return new_ip, {'instance_name': instance_name, 'static_ip_name': new_ip_name}
 
     def _set_address_type(self, instance_name: str, address_type: str) -> None:
+        self._run_operation(self.client.set_ip_address_type,
+                            resourceType='Instance', resourceName=instance_name,
+                            ipAddressType=address_type)
+
+    def _run_operation(self, operation, **kwargs) -> None:
+        # Networking can remain busy after the preceding operation reports success.
         deadline = time.monotonic() + 120
         while True:
             try:
-                response = self.client.set_ip_address_type(
-                    resourceType='Instance', resourceName=instance_name, ipAddressType=address_type
-                )
+                response = operation(**kwargs)
             except ClientError as error:
                 details = error.response['Error']
                 if (details['Code'] != 'OperationFailureException'
